@@ -9,9 +9,11 @@ import time
 import pandas as pd
 
 
+all_results = []
+
 def init_driver(): #this function helps to initialize the Chrome driver
     options = Options()
-    options.add_argument('--headless')
+    #options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     
@@ -242,11 +244,15 @@ def scrape_current_tab(driver, wait, tag):
             EC.presence_of_element_located((By.CLASS_NAME, "commandLink_TITLE-BLUE"))
         )
         for title_text, href in page_links:
-            scrape_single_tender(title_text, href)
-            back_to_results() #go back to the results page
-            wait.until(
-            EC.presence_of_all_elements_located((By.CLASS_NAME, "commandLink_TITLE-BLUE"))
-            )
+            if not any(r["Title"] == title_text for r in all_results):
+                scrape_single_tender(title_text, href)
+                back_to_results() #go back to the results page
+                wait.until(
+                EC.presence_of_all_elements_located((By.CLASS_NAME, "commandLink_TITLE-BLUE"))
+                )
+            else:
+                print(f"Skipping {title_text} as it has already been scraped.")
+                continue
     except Exception as e:
         print("Failed to find tender listings.")
     i = 2; #for next button to start from page 2
@@ -271,7 +277,7 @@ def scrape_current_tab(driver, wait, tag):
                 )
         except:
             print(f"Total pages: {i-1}")
-            break   
+            break
     return page_results
         
 def save_to_csv(results, filename="gebiz_tenders.csv"):
@@ -297,7 +303,6 @@ def save_to_csv(results, filename="gebiz_tenders.csv"):
 if __name__ == "__main__": #main function to run the script. Mostly used for testing.
     print("Starting GeBIZ scraper…")
     Keywords = ["Facilities Management", "IFM", "Integrated FM", "Integrated Facilities Management", "Integrated Building Services", "Building Services", "Managing Agent"]
-    all_results = []
     for keyword in Keywords:
         print(f"Scraping for keyword: {keyword}")
         keyword_results = []
