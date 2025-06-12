@@ -3,3 +3,7 @@ uvicorn
 msal
 httpx
 python-dotenv
+selenium
+python-jose
+passlib
+bcrypt
