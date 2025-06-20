@@ -1,33 +1,77 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import axios from "axios";
-import { embedReport } from "./powerbiEmbed.js";
 import Sidebar from "./utilities/Sidebar";
+import authAxios from "./utilities/authAxios.js";
+import MetabaseEmbed from "./utilities/MetabaseEmbed.jsx";
 
 
-function Dashboard() {
+export default function Dashboard() {
+  // you could let the user pick a dashboard, or hard‑code one:
+  const DASHBOARD_ID = 3;
+
+  return (
+    <div className="flex bg-gray-100 min-h-screen w-full">
+      <Sidebar />
+      <div className="flex-1 flex flex-col items-center justify-start px-6 py-6 space-y-2">
+        <h1 className="text-2xl font-bold bg-white shadow rounded p-2">Analytics Dashboard</h1>
+        <MetabaseEmbed dashboardId={DASHBOARD_ID} />
+      </div>
+    </div>
+
+  );
+}
+
+{/*
+export default function Dashboard(){
     const [file, setFile] = useState(null);
     const [embedConfig, setEmbedConfig] = useState(null);
+    const [loading, setLoading] = useState(false);
 
     const onUpload = async () => {
         if (!file) {
-            alert("Please select a file to upload.");
-            return;
+          alert("Please select a file to upload.");
+          return;
         }
-
+    
         const formData = new FormData();
-        form.append("file", file);
+        formData.append("file", file);
+    
         try {
-          const response = await axios.post("http://localhost:8000/uploadfile/", formData, {
+          const response = await authAxios.post("http://localhost:8000/uploadfile/", formData, {
             headers: {
               "Content-Type": "multipart/form-data",
             },
           });
           console.log("File uploaded:", response.data);
-          setEmbedConfig(response.data)
+          setEmbedConfig(response.data);
         } catch (error) {
           console.error("Upload failed:", error);
-          }
+          setError("Upload failed. Try again.");
+        }
       };
+    
+      useEffect(() => {
+        const fetchDashboardData = async () => {
+          setLoading(true);
+          try {
+            const response = await authAxios.post("http://localhost:8000/dashboard", {
+              keywords: tags, // Replace with appropriate request body if needed
+            });
+            setResults(response.data);
+          } catch (err) {
+            if (err.response?.status === 401) {
+              setError("Unauthorized. Please log in again.");
+              localStorage.removeItem("accessToken");
+            } else {
+              setError(err.message || "Something went wrong");
+            }
+          } finally {
+            setLoading(false);
+          }
+        };
+    
+        fetchDashboardData();
+      }, []);
       
         //const { data } = await axios.post("http://localhost:8000/upload", form);
         //setEmbedConfig(data);
@@ -74,5 +118,4 @@ function Dashboard() {
     </div>
   );
 }
-
-export default Dashboard;
+*/}

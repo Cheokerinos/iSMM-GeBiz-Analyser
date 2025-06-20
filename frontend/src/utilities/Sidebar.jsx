@@ -8,7 +8,7 @@ export default function Sidebar() {
   const [isCollapsed, setIsCollapsed] = useState(true);
 
   const handleLogout = () => {
-    localStorage.clear();
+    localStorage.removeItem("accessToken")
     navigate('/');
   };
 
@@ -26,6 +26,10 @@ export default function Sidebar() {
 
   const handleChangePassword = () => {
     navigate('/change-password');
+  };
+
+  const handleTable = () => {
+    navigate('/tables');
   };
 
   const toggleSidebar = () => {
@@ -73,6 +77,13 @@ export default function Sidebar() {
             </button>
 
             <button
+              onClick={handleTable}
+              className="text-left text-gray-700 hover:bg-gray-100 px-2 py-1 rounded"
+            >
+              Tables
+            </button>
+
+            <button
               onClick={handleGenerate}
               className="text-left text-gray-700 hover:bg-gray-100 px-2 py-1 rounded"
             >
@@ -84,13 +95,6 @@ export default function Sidebar() {
               className="text-left text-gray-700 hover:bg-gray-100 px-2 py-1 rounded"
             >
               History
-            </button>
-
-            <button
-              onClick={handleChangePassword}
-              className="text-left text-gray-700 hover:bg-gray-100 px-2 py-1 rounded"
-            >
-              Change Password
             </button>
 
             <button

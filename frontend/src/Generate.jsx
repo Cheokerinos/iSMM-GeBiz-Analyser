@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import axios from "axios";
+import authAxios from "./utilities/authAxios";
 import Sidebar from "./utilities/Sidebar";
 
 export default function Generate(){
@@ -9,6 +9,8 @@ export default function Generate(){
     const [loading, setLoading] = useState(false);
     const [results, setResults] = useState(null);
     const [error, setError] = useState(null);
+    const [irrelevant, setIrrelevant] = useState([]);
+    const [relevant, setRelevant] = useState([]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -22,25 +24,23 @@ export default function Generate(){
         .filter(Boolean);
     
     try {
-        const response = await fetch("http://localhost:8000/generate", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ keywords: tags }),
-        });      
-        if (!response.ok) {
-          throw new Error("Failed to scrape tenders");
+      const response = await authAxios.post("/generate", {
+        keywords: tags,
+        });
+      setRelevant(response.relevant);
+      setIrrelevant(response.irrelevant);
+      setResults(response.data);
+    } catch (err) {
+      if (err.response?.status === 401) {
+        setError("Unauthorized. Please log in again.");
+        localStorage.removeItem("accessToken"); // optional: clear token
+      } else {
+      setError(err.message || "Something went wrong");
         }
-
-        const data = await response.json();
-        setResults(data);
-        } catch (err) {
-        setError(err.message || "Something went wrong");
-        } finally {
-        setLoading(false);
+      } finally {
+          setLoading(false);
         }
-    };
+      };
     return (
       <div className="flex bg-gray-100 min-h-screen w-full">
         <Sidebar/>

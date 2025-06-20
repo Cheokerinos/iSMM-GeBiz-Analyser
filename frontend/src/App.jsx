@@ -5,19 +5,37 @@ import Dashboard from "./Dashboard"
 import Generate from "./Generate"
 import Login from "./Login"
 import Register from "./Register"
+import ProtectedRoute from "./ProtectedRoute";
+import Tables from "./Tables";
+import SessionTimeout from "./utilities/SessionTimeout";
 
 
 function App() {
   return(
-    <BrowserRouter>
-        <Routes>
-          <Route path = "/" element = {<Login />} />
-          <Route path = "/Register" element ={<Register />} / >
-          <Route path = "/Dashboard" element = {<Dashboard />} />
-          <Route path ="/Generate" element = {<Generate/>} />
-          <Route path="*" element={<Navigate to="/" />} />
-        </Routes>
-      </BrowserRouter>
+    <SessionTimeout>
+          <Routes>
+            <Route path = "/" element = {<Login />} />
+            <Route path = "/Register" element ={<Register />} / >
+            <Route path="/dashboard" element={
+            <ProtectedRoute>
+              <Dashboard />
+            </ProtectedRoute>
+            } />
+
+            <Route path="/generate" element={
+              <ProtectedRoute>
+                <Generate />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/tables" element={
+              <ProtectedRoute>
+                <Tables />
+              </ProtectedRoute>
+            } />
+            <Route path="*" element={<Navigate to="/" />} />
+          </Routes>
+      </SessionTimeout>
   )
 }
 

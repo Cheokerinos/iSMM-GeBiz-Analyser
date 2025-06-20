@@ -1,12 +1,20 @@
 
 export function setToken(token) {
-    localStorage.setItem("access_token", token);
+    localStorage.setItem("accessToken", token);
   }
   
   export function getToken() {
-    return localStorage.getItem("access_token");
+    return localStorage.getItem("accessToken");
   }
   
   export function clearToken() {
-    localStorage.removeItem("access_token");
+    localStorage.removeItem("accessToken");
+  }
+
+  export function setRefreshToken(refresh_token) {
+    localStorage.setItem("refreshToken", refresh_token);
+  }
+
+  export function getRefreshToken() {
+    return localStorage.getItem("refreshToken");
   }
