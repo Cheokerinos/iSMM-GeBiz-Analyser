@@ -1,18 +1,17 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, status, BackgroundTasks
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, status, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from pydantic import BaseModel , EmailStr, Field, field_validator
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
-import sqlite3
-import requests
-import bcrypt
+from concurrent.futures import ThreadPoolExecutor
+import sqlite3, requests, bcrypt
 import pandas as pd
-import uvicorn
-import os, httpx
+import uvicorn, torch, asyncio
+import os, httpx, csv
 from dotenv import load_dotenv
+from transformers import DistilBertTokenizer, DistilBertForSequenceClassification
 from scraper import scrape_by_keyword
 
 
@@ -65,9 +64,31 @@ def init_refresh_token_db():
     """)
     conn.commit()
     conn.close()
+    
+def init_nlp_db():
+    conn = sqlite3.connect(f"{OUTPUT_DIR}/mydata.db")
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS tenders
+                 (id INTEGER PRIMARY KEY,
+                  title TEXT NOT NULL,
+                  tender_number TEXT,
+                  agency TEXT NOT NULL,
+                  ref_number TEXT,
+                  awarded TEXT NOT NULL,
+                  awardee TEXT,
+                  respondents TEXT NOT NULL,
+                  num_of_respondents INTEGER NOT NULL,
+                  keywords TEXT NOT NULL,
+                  ai_prediction BOOLEAN,
+                  ai_confidence REAL,
+                  user_decision BOOLEAN,
+                  timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+    conn.commit()
+    conn.close()
 
 init_user_db()
 init_refresh_token_db()
+init_nlp_db()
 
 app = FastAPI()
 
@@ -425,12 +446,188 @@ async def get_table_embed_url(
     iframe_url = f"{METABASE_SITE_URL}/embed/question/{metabase_token}#bordered=true&titled=true"
     return {"iframe_url": iframe_url}
 
+
+#--- NLP Transformer Setup ---
+torch.backends.quantized.engine = "qnnpack"
+tokenizer = DistilBertTokenizer.from_pretrained("distilbert-base-uncased")
+model = DistilBertForSequenceClassification.from_pretrained("distilbert-base-uncased", num_labels=2)
+
+quantized_model = torch.quantization.quantize_dynamic(
+    model, {torch.nn.Linear}, dtype=torch.qint8
+)
+
+executor = ThreadPoolExecutor(max_workers=4)
+
+class ClassificationRequest(BaseModel):
+    tenders: list[str]
+    keywords: list[str]
+
+class TenderDecision(BaseModel):
+    title: str
+    decision: bool
+    keywords: list[str]
+
+class DecisionItem(BaseModel):
+    title: str
+    tender_number: Optional[str]
+    agency: Optional[str]
+    ref_number: Optional[str]
+    awarded: Optional[str]
+    awardee: Optional[str]
+    respondents: Optional[str]
+    num_of_respondents: Optional[int]
+    keywords: List[str]
+    ai_prediction: bool
+    ai_confidence: float
+    user_decision: bool
     
+class BulkDecisions(BaseModel):
+    decisions: List[DecisionItem]
+
+    
+def classify_tender_sync(tender_title: str, keywords: list[str]):
+    """Classify tender relevance using DistilBERT (synchronous version)"""
+    prompt = f"Determine tender relevance for {', '.join(keywords)}: {tender_title}"
+    
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=128)
+    with torch.no_grad():
+        outputs = quantized_model(**inputs)
+    
+    probabilities = torch.softmax(outputs.logits, dim=1)
+    ai_prediction = bool(torch.argmax(probabilities, dim=1).item())
+    ai_confidence = float(torch.max(probabilities).item())
+    
+    return ai_prediction, ai_confidence
+
+async def classify_tender(tender_title: str, keywords: list[str]):
+    """Async wrapper for classification"""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        executor, 
+        classify_tender_sync, 
+        tender_title, 
+        keywords
+    )
+    
+def save_to_db(
+    tender_title: str,
+    tender_number: Optional[str],
+    agency: str,
+    ref_number: Optional[str],
+    awarded: str,
+    awardee: Optional[str],
+    respondents: str,
+    num_of_respondents: int,
+    keywords: list[str],
+    ai_prediction: bool,
+    ai_confidence: float,
+    user_decision: bool):
+    """Save tender data to SQLite database"""
+    try:
+        conn = sqlite3.connect(f"{OUTPUT_DIR}/mydata.db")
+        c = conn.cursor()
+        kw_str = '|'.join(keywords)
+        c.execute("""
+            INSERT INTO tenders
+            (title, tender_number, agency, ref_number,
+            awarded, awardee, respondents, num_of_respondents,
+            keywords, ai_prediction, ai_confidence, user_decision)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            tender_title,
+            tender_number,
+            agency,
+            ref_number,
+            awarded,
+            awardee,
+            respondents,
+            num_of_respondents,
+            kw_str,
+            ai_prediction,
+            ai_confidence,
+            user_decision
+        ))
+        conn.commit()
+        return c.lastrowid
+    except Exception as e:
+        print(f"Database error: {str(e)}")
+        raise
+    finally:
+        conn.close()
+
+#--- NLP Endpoints ---
+@app.post("/classify")
+async def classify_tenders(request: ClassificationRequest):
+    """Classify multiple tenders"""
+    try:
+        results = []
+        classification_tasks = []
+        
+        # Create classification tasks
+        for tender in request.tenders:
+            task = classify_tender(tender, request.keywords)
+            classification_tasks.append(task)
+        
+        # Run classifications concurrently
+        classification_results = await asyncio.gather(*classification_tasks)
+        
+        # Format results
+        for tender, (ai_prediction, ai_confidence) in zip(request.tenders, classification_results):
+            results.append({
+                "title": tender,
+                "ai_prediction": ai_prediction,
+                "ai_confidence": ai_confidence
+            })
+        
+        return results
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+def get_all_titles():
+    conn = sqlite3.connect(f"{OUTPUT_DIR}/mydata.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT Title FROM tenders")
+    titles = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    return titles
+    
+def clear_tenders_table():
+    conn = sqlite3.connect(f"{OUTPUT_DIR}/mydata.db")
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM tenders")
+    conn.commit()
+    conn.close()
+    
+@app.post("/save-decisions")
+async def save_decision(payload: BulkDecisions, current_user=Depends(get_current_user)):
+    try:
+        clear_tenders_table()  # Clear existing data before saving new decisions
+        for d in payload.decisions:
+            save_to_db(
+                tender_title=d.title,
+                tender_number=d.tender_number,
+                agency=d.agency,
+                ref_number=d.ref_number,
+                awarded=d.awarded,
+                awardee=d.awardee,
+                respondents=d.respondents,
+                num_of_respondents=d.num_of_respondents,
+                keywords=d.keywords,
+                ai_prediction=d.ai_prediction,
+                ai_confidence=d.ai_confidence,
+                user_decision=d.user_decision
+            )
+            
+        
+        return {"status": "success", "message": "Decision saved to database"}
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 #---Tender Scraper--
 class KeywordRequest(BaseModel):
     keywords: List[str]
-
 
 OUTPUT_DIR = "/Users/Cheokerinos/metabase_data"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -439,10 +636,11 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 @app.post("/generate")
 def scrape_tenders(request: KeywordRequest,
                    current_user: dict = Depends(get_current_user)):
+    past_results = get_all_titles()
     all_results = []
     for keyword in request.keywords:
         print(f"Scraping for keyword: {keyword}")
-        results = scrape_by_keyword(keyword)
+        results = scrape_by_keyword(keyword, past_results=past_results)
         if results:
             for result in results:
                 if result not in all_results:
@@ -452,11 +650,16 @@ def scrape_tenders(request: KeywordRequest,
         if isinstance(respondents, list):
             formatted = [f"{r} - {a}" for r, a in respondents]
             result["Respondents"] = " | ".join(formatted)
-            result["No. of Respondents"] = len(respondents)
+            result["Num of Respondents"] = len(respondents)
         else:
             result["Respondents"] = "N/A"
-            result["No. of Respondents"] = 0
-    df = pd.DataFrame(all_results)
+            result["Num of Respondents"] = 0
+    
+    
+    return { "results": all_results}
+
+
+'''    df = pd.DataFrame(all_results)
     sort_order = ["OPEN","AWARDED","PENDING AWARD","NO AWARD"]
     df['Awarded'] = pd.Categorical(df['Awarded'], categories=sort_order, ordered=True)
     df.sort_values(by=['Awarded', 'Title'], inplace=True)  # Sort by Tab and then Title
@@ -466,15 +669,7 @@ def scrape_tenders(request: KeywordRequest,
     csv_path = f"{OUTPUT_DIR}/tenders_{timestamp}.csv"
     sqlite_path = f"{OUTPUT_DIR}/mydata.db"
     df.to_csv(filename, index=False)
-    csv_to_sqlite(csv_path,sqlite_path)
-    
-    
-    return {
-        "message": f"{len(all_results)} records saved.",
-        "csv_path": filename,
-        "results": all_results}
-    
-
+    csv_to_sqlite(csv_path,sqlite_path)'''
     
 def csv_to_sqlite(csv_path, sqlite_path, table_name="tenders"):
     df = pd.read_csv(csv_path)

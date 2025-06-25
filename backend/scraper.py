@@ -21,7 +21,7 @@ def init_driver(): #this function helps to initialize the Chrome driver
     return driver
 
     
-def scrape_by_keyword(keyword):
+def scrape_by_keyword(keyword , past_results):
     results = []
     driver = init_driver()
     url = 'https://www.gebiz.gov.sg/' #GeBiz URL
@@ -45,7 +45,7 @@ def scrape_by_keyword(keyword):
     go_btn.click()
     ##print("Clicking search button…")
     #scrape open tab first
-    open_results = scrape_current_tab(driver, wait, "Open")
+    open_results = scrape_current_tab(driver, wait, "Open", past_results)
     for r in open_results:
         if r not in results:
             results.append(r)
@@ -68,10 +68,12 @@ def scrape_by_keyword(keyword):
     for r in closed_results:
         if r not in results:
             results.append(r)
+    
+    driver.quit()
     return results
 
 def scrape_awardees(driver, wait, timeout=10):
-    awardees=[]
+    awardee=[]
     #wait for and find the "Awarded to" header
     wait.until(EC.presence_of_element_located((
         By.CSS_SELECTOR, "div.formSectionHeader4_MAIN"
@@ -102,14 +104,14 @@ def scrape_awardees(driver, wait, timeout=10):
             )
             text = name_div.text.strip()
             if text:
-                awardees.append(text)
+                awardee.append(text)
         except Exception:
             #if anything here fails, skip this section
             continue
-    return awardees
+    return awardee
         
     
-def scrape_current_tab(driver, wait, tag):
+def scrape_current_tab(driver, wait, tag, past_results):
     page_results = []
     def grab_links():
         #wait for new search results to load
@@ -202,7 +204,6 @@ def scrape_current_tab(driver, wait, tag):
                 awarded_btn.click()
                 ##print("Clicking on awarded button…")
                 awardee = scrape_awardees(driver, wait)
-                ##print(f"Awardee: {awardee}")
                 time.sleep(2)
             else:
                     awardee = "N/A"
@@ -245,6 +246,8 @@ def scrape_current_tab(driver, wait, tag):
             EC.presence_of_element_located((By.CLASS_NAME, "commandLink_TITLE-BLUE"))
         )
         for title_text, href in page_links:
+            if title_text in past_results:
+                continue
             if not any(r["Title"] == title_text for r in all_results):
                 scrape_single_tender(title_text, href)
                 back_to_results() #go back to the results page
@@ -301,7 +304,7 @@ def save_to_csv(results, filename="gebiz_tenders.csv"):
 
 #for i, title in enumerate(titles, 1): <incase
 #print(f"{i}. {title.text.strip()}")
-    
+''' 
 if __name__ == "__main__": #main function to run the script. Mostly used for testing.
     print("Starting GeBIZ scraper…")
     Keywords = ["Facilities Management", "IFM", "Integrated FM", "Integrated Facilities Management", "Integrated Building Services", "Building Services", "Managing Agent"]
@@ -314,3 +317,4 @@ if __name__ == "__main__": #main function to run the script. Mostly used for tes
                 all_results.append(result)
     save_to_csv(all_results)
     print("Scrape complete.") 
+'''  
